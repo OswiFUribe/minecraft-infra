@@ -1,0 +1,25 @@
+Transform: AWS::Serverless-2016-10-31
+Resources:
+  StartServerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Runtime: python3.12
+      Handler: start_server.lambda_handler
+      CodeUri: StartServerFunction
+      Environment:
+        Variables:
+          INSTANCE_ID: i-041679efad1340581
+      Policies:
+      - Statement:
+        - Effect: Allow
+          Action:
+          - ec2:StartInstances
+          Resource: '*'
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            Path: /start
+            Method: GET
+    Metadata:
+      SamResourceId: StartServerFunction
