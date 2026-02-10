@@ -22,3 +22,56 @@ Resources:
           Properties:
             Path: /start
             Method: GET
+  LatestBackupFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Runtime: python3.12
+      Handler: latest_backup.lambda_handler
+      CodeUri: lambdas/
+      Timeout: 15
+      MemorySize: 256
+      Environment:
+        Variables:
+          BUCKET_NAME: minecraft-backups-oswal
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - s3:ListBucket
+              Resource: arn:aws:s3:::minecraft-backups-oswal
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+              Resource: arn:aws:s3:::minecraft-backups-oswal/*
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            Path: /latest-backup
+            Method: GET
+  StopServerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Runtime: python3.12
+      Handler: stop_server.lambda_handler
+      CodeUri: lambdas/
+      Timeout: 5
+      Environment:
+        Variables:
+          INSTANCE_ID: i-041679efad1340581
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - ec2:StopInstances
+              Resource: "*"
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            Path: /stop
+            Method: GET
+        DailyShutdown:
+          Type: Schedule
+          Properties:
+            Schedule: cron(0 12 * * ? *)
