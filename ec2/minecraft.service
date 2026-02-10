@@ -1,0 +1,13 @@
+[Unit]
+Description=Minecraft Server
+After=network.target
+
+[Service]
+User=minecraft
+WorkingDirectory=/home/minecraft/server
+ExecStart=/home/minecraft/server/start.sh
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
