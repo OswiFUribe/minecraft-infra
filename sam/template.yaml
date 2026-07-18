@@ -1,6 +1,290 @@
 Transform: AWS::Serverless-2016-10-31
 
+Parameters:
+  InstanceType:
+    Type: String
+    Description: EC2 Instance Type for the Minecraft Server (modpacks require at least 8GB RAM).
+    Default: t3.large
+  JavaVersion:
+    Type: String
+    Description: Java version package to install (e.g. java-21-amazon-corretto, java-17-amazon-corretto).
+    Default: java-21-amazon-corretto
+  ModpackZipKey:
+    Type: String
+    Description: S3 Key for the CurseForge server ZIP pack.
+    Default: server-files/modpack.zip
+  LatestAmiId:
+    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+    Default: '/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64'
+
 Resources:
+  # Networking
+  MinecraftVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: MinecraftVPC
+
+  MinecraftSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref MinecraftVPC
+      CidrBlock: 10.0.1.0/24
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: MinecraftSubnet
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Tags:
+      - Key: Name
+        Value: MinecraftIGW
+
+  VPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref MinecraftVPC
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref MinecraftVPC
+      Tags:
+        - Key: Name
+          Value: MinecraftPublicRouteTable
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: VPCGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  SubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref MinecraftSubnet
+      RouteTableId: !Ref PublicRouteTable
+
+  # Security Group (Only Minecraft Port 25565 is exposed)
+  MinecraftSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow Minecraft connection and outbound traffic
+      VpcId: !Ref MinecraftVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 25565
+          ToPort: 25565
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          FromPort: -1
+          ToPort: -1
+          CidrIp: 0.0.0.0/0
+
+  # S3 Bucket for backups and modpacks
+  MinecraftBackupBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "minecraft-backups-${AWS::AccountId}-${AWS::Region}"
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  # IAM Roles and Profile for EC2 (Allows SSM and S3 access)
+  MinecraftEC2Role:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: [ec2.amazonaws.com]
+            Action: [sts:AssumeRole]
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: MinecraftS3BackupPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource:
+                  - !Sub "arn:aws:s3:::${MinecraftBackupBucket}"
+                  - !Sub "arn:aws:s3:::${MinecraftBackupBucket}/*"
+
+  MinecraftEC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref MinecraftEC2Role
+
+  # EC2 Instance
+  MinecraftEC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref InstanceType
+      ImageId: !Ref LatestAmiId
+      IamInstanceProfile: !Ref MinecraftEC2InstanceProfile
+      SubnetId: !Ref MinecraftSubnet
+      SecurityGroupIds:
+        - !Ref MinecraftSecurityGroup
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          # Redirect output to user-data log
+          exec > >(tee /var/log/user-data.log|logger -t user-data -s 2>/dev/null) 2>&1
+          
+          echo "==== Starting Minecraft Setup ===="
+          # Update and install dependencies
+          yum update -y
+          yum install ${JavaVersion} -y
+          yum install screen unzip -y
+          
+          # Install AWS CLI v2
+          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+          unzip awscliv2.zip
+          ./aws/install
+          rm -rf awscliv2.zip aws
+          
+          # Create minecraft user and directory
+          useradd minecraft
+          mkdir -p /home/minecraft/server
+          
+          # Download Modpack from S3
+          echo "Downloading modpack from s3://${MinecraftBackupBucket}/${ModpackZipKey}..."
+          aws s3 cp s3://${MinecraftBackupBucket}/${ModpackZipKey} /tmp/modpack.zip
+          
+          if [ -f /tmp/modpack.zip ]; then
+            echo "Extracting modpack..."
+            unzip /tmp/modpack.zip -d /home/minecraft/server/
+            rm /tmp/modpack.zip
+          else
+            echo "Warning: Modpack zip not found in S3. Creating an empty server directory."
+          fi
+          
+          # Accept EULA
+          echo "eula=true" > /home/minecraft/server/eula.txt
+          
+          # Setup start.sh script
+          cat << 'EOF' > /home/minecraft/server/start.sh
+          #!/bin/bash
+          cd /home/minecraft/server
+          
+          # Detect start methods for modpacks
+          if [ -f run.sh ]; then
+            echo "Starting via run.sh..."
+            bash run.sh
+          elif [ -f start.sh ] && [ "$(realpath start.sh)" != "$(realpath /home/minecraft/server/start.sh)" ]; then
+            echo "Starting via modpack start.sh..."
+            bash start.sh
+          else
+            # Search for typical launch jars (forge, fabric, server, paper)
+            JAR_FILE=$(ls forge-*.jar fabric-server-launch.jar server.jar paper.jar 2>/dev/null | head -n 1)
+            if [ -n "$JAR_FILE" ]; then
+              echo "Starting server jar $JAR_FILE..."
+              java -Xms4G -Xmx6G \
+                -XX:+UseG1GC \
+                -XX:+ParallelRefProcEnabled \
+                -XX:MaxGCPauseMillis=200 \
+                -XX:+UnlockExperimentalVMOptions \
+                -XX:+DisableExplicitGC \
+                -XX:+AlwaysPreTouch \
+                -XX:G1NewSizePercent=30 \
+                -XX:G1MaxNewSizePercent=40 \
+                -XX:G1HeapRegionSize=16M \
+                -XX:G1ReservePercent=20 \
+                -XX:G1HeapWastePercent=5 \
+                -jar "$JAR_FILE" nogui
+            else
+              echo "Error: No compatible jar found to start."
+              exit 1
+            fi
+          fi
+          EOF
+          
+          chmod +x /home/minecraft/server/start.sh
+          
+          # Setup backup.sh script
+          cat << 'EOF' > /home/minecraft/backup.sh
+          #!/bin/bash
+          DATE=$(date +"%Y-%m-%d_%H-%M")
+          BACKUP="mc_backup_$DATE.tar.gz"
+          
+          # Stop service to prevent world corruption
+          sudo systemctl stop minecraft
+          
+          # Create backup tarball
+          tar -czvf /tmp/$BACKUP \
+            /home/minecraft/server/world* \
+            /home/minecraft/server/mods \
+            /home/minecraft/server/config
+          
+          # Restart service
+          sudo systemctl start minecraft
+          
+          # Copy to S3
+          aws s3 cp /tmp/$BACKUP s3://${MinecraftBackupBucket}/backups/
+          rm /tmp/$BACKUP
+          EOF
+          
+          chmod +x /home/minecraft/backup.sh
+          
+          # Setup cron job for backup at 04:00 AM daily
+          (crontab -l 2>/dev/null; echo "0 4 * * * /home/minecraft/backup.sh") | crontab -
+          
+          # Setup systemd service (runs inside a screen session to allow interactive console if needed via SSM)
+          cat << 'EOF' > /etc/systemd/system/minecraft.service
+          [Unit]
+          Description=Minecraft Server
+          After=network.target
+          
+          [Service]
+          User=minecraft
+          WorkingDirectory=/home/minecraft/server
+          ExecStart=/usr/bin/screen -DmS minecraft /home/minecraft/server/start.sh
+          ExecStop=/usr/bin/screen -p 0 -S minecraft -X eval 'stuff "stop\r"'
+          Restart=always
+          RestartSec=10
+          
+          [Install]
+          WantedBy=multi-user.target
+          EOF
+          
+          # Adjust permissions
+          chown -R minecraft:minecraft /home/minecraft
+          
+          # Reload and enable
+          systemctl daemon-reload
+          systemctl enable minecraft
+          
+          # Only start if server files exist
+          if [ -d /home/minecraft/server/mods ] || [ -f /home/minecraft/server/run.sh ] || [ -f /home/minecraft/server/server.jar ]; then
+            systemctl start minecraft
+          fi
+          
+          echo "==== Finished Minecraft Setup ===="
+      Tags:
+        - Key: Name
+          Value: MinecraftServerInstance
+
+  # Lambda Control Functions
   StartServerFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -9,7 +293,7 @@ Resources:
       CodeUri: lambdas/
       Environment:
         Variables:
-          INSTANCE_ID: i-041679efad1340581
+          INSTANCE_ID: !Ref MinecraftEC2Instance
       Policies:
         - Statement:
             - Effect: Allow
@@ -22,6 +306,7 @@ Resources:
           Properties:
             Path: /start
             Method: GET
+
   LatestBackupFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -32,23 +317,24 @@ Resources:
       MemorySize: 256
       Environment:
         Variables:
-          BUCKET_NAME: minecraft-backups-oswal
+          BUCKET_NAME: !Ref MinecraftBackupBucket
       Policies:
         - Statement:
             - Effect: Allow
               Action:
                 - s3:ListBucket
-              Resource: arn:aws:s3:::minecraft-backups-oswal
+              Resource: !Sub "arn:aws:s3:::${MinecraftBackupBucket}"
             - Effect: Allow
               Action:
                 - s3:GetObject
-              Resource: arn:aws:s3:::minecraft-backups-oswal/*
+              Resource: !Sub "arn:aws:s3:::${MinecraftBackupBucket}/*"
       Events:
         Api:
           Type: HttpApi
           Properties:
             Path: /latest-backup
             Method: GET
+
   StopServerFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -58,7 +344,7 @@ Resources:
       Timeout: 5
       Environment:
         Variables:
-          INSTANCE_ID: i-041679efad1340581
+          INSTANCE_ID: !Ref MinecraftEC2Instance
       Policies:
         - Statement:
             - Effect: Allow
@@ -75,3 +361,14 @@ Resources:
           Type: Schedule
           Properties:
             Schedule: cron(0 12 * * ? *)
+
+Outputs:
+  ServerPublicIP:
+    Description: Public IP address of the Minecraft server
+    Value: !GetAtt MinecraftEC2Instance.PublicIp
+  BackupBucketName:
+    Description: S3 Bucket Name for backups
+    Value: !Ref MinecraftBackupBucket
+  ApiEndpoint:
+    Description: HTTP API Gateway Endpoint to control the server
+    Value: !Sub "https://${ServerlessHttpApi}.execute-api.${AWS::Region}.amazonaws.com"
