@@ -212,7 +212,7 @@ Resources:
             echo "Starting via original start-modpack.sh..."
             sed -i 's/\r$//' start-modpack.sh
             chmod +x start-modpack.sh
-            export JAVA_ARGS="-Xms${MIN_RAM_MB}M -Xmx${MAX_RAM_MB}M"
+            export JAVA_ARGS="-Xms${!MIN_RAM_MB}M -Xmx${!MAX_RAM_MB}M"
             bash start-modpack.sh
           # 2. Detect start methods for modpacks (Forge/Fabric run.sh)
           elif [ -f run.sh ]; then
@@ -227,8 +227,8 @@ Resources:
             # Search for typical launch jars (forge, fabric, server, paper)
             JAR_FILE=$(ls forge-*.jar fabric-server-launch.jar server.jar paper.jar 2>/dev/null | head -n 1)
             if [ -n "$JAR_FILE" ]; then
-              echo "Starting server jar $JAR_FILE with Min=${MIN_RAM_MB}M, Max=${MAX_RAM_MB}M..."
-              java -Xms${MIN_RAM_MB}M -Xmx${MAX_RAM_MB}M \
+              echo "Starting server jar $JAR_FILE with Min=${!MIN_RAM_MB}M, Max=${!MAX_RAM_MB}M..."
+              java -Xms${!MIN_RAM_MB}M -Xmx${!MAX_RAM_MB}M \
                 -XX:+UseG1GC \
                 -XX:+ParallelRefProcEnabled \
                 -XX:MaxGCPauseMillis=200 \

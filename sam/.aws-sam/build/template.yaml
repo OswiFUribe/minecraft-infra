@@ -159,18 +159,35 @@ Resources:
             \ s3 cp s3://${MinecraftBackupBucket}/${ModpackZipKey} /tmp/modpack.zip\n\
             \nif [ -f /tmp/modpack.zip ]; then\n  echo \"Extracting modpack...\"\n\
             \  unzip /tmp/modpack.zip -d /home/minecraft/server/\n  rm /tmp/modpack.zip\n\
-            else\n  echo \"Warning: Modpack zip not found in S3. Creating an empty\
-            \ server directory.\"\nfi\n\n# Accept EULA\necho \"eula=true\" > /home/minecraft/server/eula.txt\n\
-            \n# Setup start.sh script\ncat << 'EOF' > /home/minecraft/server/start.sh\n\
-            #!/bin/bash\ncd /home/minecraft/server\n\n# Detect start methods for modpacks\n\
-            if [ -f run.sh ]; then\n  echo \"Starting via run.sh...\"\n  bash run.sh\n\
-            elif [ -f start.sh ] && [ \"$(realpath start.sh)\" != \"$(realpath /home/minecraft/server/start.sh)\"\
-            \ ]; then\n  echo \"Starting via modpack start.sh...\"\n  bash start.sh\n\
-            else\n  # Search for typical launch jars (forge, fabric, server, paper)\n\
-            \  JAR_FILE=$(ls forge-*.jar fabric-server-launch.jar server.jar paper.jar\
-            \ 2>/dev/null | head -n 1)\n  if [ -n \"$JAR_FILE\" ]; then\n    echo\
-            \ \"Starting server jar $JAR_FILE...\"\n    java -Xms4G -Xmx6G \\\n  \
-            \    -XX:+UseG1GC \\\n      -XX:+ParallelRefProcEnabled \\\n      -XX:MaxGCPauseMillis=200\
+            \  if [ -f /home/minecraft/server/start.sh ]; then\n    mv /home/minecraft/server/start.sh\
+            \ /home/minecraft/server/start-modpack.sh\n  fi\nelse\n  echo \"Warning:\
+            \ Modpack zip not found in S3. Creating an empty server directory.\"\n\
+            fi\n\n# Accept EULA\necho \"eula=true\" > /home/minecraft/server/eula.txt\n\
+            \n# Setup start.sh script with dynamic memory calculation\ncat << 'EOF'\
+            \ > /home/minecraft/server/start.sh\n#!/bin/bash\ncd /home/minecraft/server\n\
+            \n# Calculate dynamic RAM + Swap allocated memory\nTOTAL_RAM_KB=$(grep\
+            \ MemTotal /proc/meminfo | awk '{print $2}')\nTOTAL_SWAP_KB=$(grep SwapTotal\
+            \ /proc/meminfo | awk '{print $2}')\nTOTAL_MEM_MB=$(( (TOTAL_RAM_KB +\
+            \ TOTAL_SWAP_KB) / 1024 ))\n\n# Set Java heap to 70% of total memory\n\
+            MAX_RAM_MB=$(( TOTAL_MEM_MB * 70 / 100 ))\nMIN_RAM_MB=$(( MAX_RAM_MB /\
+            \ 2 ))\nif [ $MIN_RAM_MB -lt 1024 ]; then\n  MIN_RAM_MB=1024\nfi\nif [\
+            \ $MAX_RAM_MB -lt $MIN_RAM_MB ]; then\n  MAX_RAM_MB=$MIN_RAM_MB\nfi\n\n\
+            # 1. Detect if renamed start-modpack.sh exists (ServerPackCreator original\
+            \ script)\nif [ -f start-modpack.sh ]; then\n  echo \"Starting via original\
+            \ start-modpack.sh...\"\n  sed -i 's/\\r$//' start-modpack.sh\n  chmod\
+            \ +x start-modpack.sh\n  export JAVA_ARGS=\"-Xms${MIN_RAM_MB}M -Xmx${MAX_RAM_MB}M\"\
+            \n  bash start-modpack.sh\n# 2. Detect start methods for modpacks (Forge/Fabric\
+            \ run.sh)\nelif [ -f run.sh ]; then\n  echo \"Starting via run.sh...\"\
+            \n  chmod +x run.sh\n  bash run.sh\n# 3. Detect custom modpack start.sh\
+            \ (avoiding recursion)\nelif [ -f start.sh ] && [ \"$(realpath start.sh)\"\
+            \ != \"$(realpath /home/minecraft/server/start.sh)\" ]; then\n  echo \"\
+            Starting via modpack start.sh...\"\n  bash start.sh\nelse\n  # Search\
+            \ for typical launch jars (forge, fabric, server, paper)\n  JAR_FILE=$(ls\
+            \ forge-*.jar fabric-server-launch.jar server.jar paper.jar 2>/dev/null\
+            \ | head -n 1)\n  if [ -n \"$JAR_FILE\" ]; then\n    echo \"Starting server\
+            \ jar $JAR_FILE with Min=${MIN_RAM_MB}M, Max=${MAX_RAM_MB}M...\"\n   \
+            \ java -Xms${MIN_RAM_MB}M -Xmx${MAX_RAM_MB}M \\\n      -XX:+UseG1GC \\\
+            \n      -XX:+ParallelRefProcEnabled \\\n      -XX:MaxGCPauseMillis=200\
             \ \\\n      -XX:+UnlockExperimentalVMOptions \\\n      -XX:+DisableExplicitGC\
             \ \\\n      -XX:+AlwaysPreTouch \\\n      -XX:G1NewSizePercent=30 \\\n\
             \      -XX:G1MaxNewSizePercent=40 \\\n      -XX:G1HeapRegionSize=16M \\\
@@ -286,13 +303,27 @@ Resources:
             Schedule: cron(0 12 * * ? *)
     Metadata:
       SamResourceId: StopServerFunction
+  MinecraftEIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      Tags:
+      - Key: Name
+        Value: MinecraftEIP
+  MinecraftEIPAssociation:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      InstanceId:
+        Ref: MinecraftEC2Instance
+      AllocationId:
+        Fn::GetAtt:
+        - MinecraftEIP
+        - AllocationId
 Outputs:
   ServerPublicIP:
-    Description: Public IP address of the Minecraft server
+    Description: Public IP address of the Minecraft server (Elastic IP)
     Value:
-      Fn::GetAtt:
-      - MinecraftEC2Instance
-      - PublicIp
+      Ref: MinecraftEIP
   BackupBucketName:
     Description: S3 Bucket Name for backups
     Value:
