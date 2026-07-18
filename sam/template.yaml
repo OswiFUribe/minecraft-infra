@@ -3,8 +3,8 @@ Transform: AWS::Serverless-2016-10-31
 Parameters:
   InstanceType:
     Type: String
-    Description: EC2 Instance Type for the Minecraft Server (Free Tier eligible is t2.micro).
-    Default: t2.micro
+    Description: EC2 Instance Type for the Minecraft Server (modpacks require high performance).
+    Default: t3.xlarge
   JavaVersion:
     Type: String
     Description: Java version package to install (e.g. java-21-amazon-corretto, java-17-amazon-corretto).
@@ -45,6 +45,7 @@ Resources:
       Tags:
         - Key: Name
           Value: MinecraftIGW
+
 
   VPCGatewayAttachment:
     Type: AWS::EC2::VPCGatewayAttachment
@@ -153,17 +154,6 @@ Resources:
           exec > >(tee /var/log/user-data.log|logger -t user-data -s 2>/dev/null) 2>&1
           
           echo "==== Starting Minecraft Setup ===="
-          
-          # Setup 4GB Swap space (essential for t2.micro/t3.micro Free Tier instances)
-          if [ ! -f /swapfile ]; then
-            echo "Setting up 4GB Swap space..."
-            dd if=/dev/zero of=/swapfile bs=1M count=4096
-            chmod 600 /swapfile
-            mkswap /swapfile
-            swapon /swapfile
-            echo "/swapfile swap swap defaults 0 0" >> /etc/fstab
-          fi
-          
           # Update and install dependencies
           yum update -y
           yum install ${JavaVersion} -y
@@ -194,25 +184,10 @@ Resources:
           # Accept EULA
           echo "eula=true" > /home/minecraft/server/eula.txt
           
-          # Setup start.sh script with dynamic memory calculation
+          # Setup start.sh script
           cat << 'EOF' > /home/minecraft/server/start.sh
           #!/bin/bash
           cd /home/minecraft/server
-          
-          # Calculate dynamic RAM + Swap allocated memory
-          TOTAL_RAM_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
-          TOTAL_SWAP_KB=$(grep SwapTotal /proc/meminfo | awk '{print $2}')
-          TOTAL_MEM_MB=$(( (TOTAL_RAM_KB + TOTAL_SWAP_KB) / 1024 ))
-          
-          # Set Java heap to 70% of total memory
-          MAX_RAM_MB=$(( TOTAL_MEM_MB * 70 / 100 ))
-          MIN_RAM_MB=$(( MAX_RAM_MB / 2 ))
-          if [ $MIN_RAM_MB -lt 1024 ]; then
-            MIN_RAM_MB=1024
-          fi
-          if [ $MAX_RAM_MB -lt $MIN_RAM_MB ]; then
-            MAX_RAM_MB=$MIN_RAM_MB
-          fi
           
           # Detect start methods for modpacks
           if [ -f run.sh ]; then
@@ -225,8 +200,8 @@ Resources:
             # Search for typical launch jars (forge, fabric, server, paper)
             JAR_FILE=$(ls forge-*.jar fabric-server-launch.jar server.jar paper.jar 2>/dev/null | head -n 1)
             if [ -n "$JAR_FILE" ]; then
-              echo "Starting server jar $JAR_FILE with Min=${MIN_RAM_MB}M, Max=${MAX_RAM_MB}M..."
-              java -Xms${MIN_RAM_MB}M -Xmx${MAX_RAM_MB}M \
+              echo "Starting server jar $JAR_FILE..."
+              java -Xms4G -Xmx6G \
                 -XX:+UseG1GC \
                 -XX:+ParallelRefProcEnabled \
                 -XX:MaxGCPauseMillis=200 \
