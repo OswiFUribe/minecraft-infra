@@ -4,7 +4,7 @@ Parameters:
     Type: String
     Description: EC2 Instance Type for the Minecraft Server (modpacks require at least
       8GB RAM).
-    Default: t3.large
+    Default: t3.xlarge
   JavaVersion:
     Type: String
     Description: Java version package to install (e.g. java-21-amazon-corretto, java-17-amazon-corretto).
@@ -38,9 +38,10 @@ Resources:
         Value: MinecraftSubnet
   InternetGateway:
     Type: AWS::EC2::InternetGateway
-    Tags:
-    - Key: Name
-      Value: MinecraftIGW
+    Properties:
+      Tags:
+      - Key: Name
+        Value: MinecraftIGW
   VPCGatewayAttachment:
     Type: AWS::EC2::VPCGatewayAttachment
     Properties:

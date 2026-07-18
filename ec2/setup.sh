@@ -24,19 +24,31 @@ fi
 
 echo "Usando el bucket de S3: $BUCKET_NAME"
 
-# 2. Actualizar sistema e instalar Java y utilidades
+# 2. Configurar memoria Swap de 4GB (Crucial para instancias del Free Tier como t2.micro/t3.micro)
+if [ ! -f /swapfile ]; then
+  echo "Configurando 4GB de memoria Swap..."
+  sudo dd if=/dev/zero of=/swapfile bs=1M count=4096
+  sudo chmod 600 /swapfile
+  sudo mkswap /swapfile
+  sudo swapon /swapfile
+  echo "/swapfile swap swap defaults 0 0" | sudo tee -a /etc/fstab > /dev/null
+else
+  echo "Memoria Swap ya está configurada."
+fi
+
+# 3. Actualizar sistema e instalar Java y utilidades
 echo "Instalando dependencias de sistema..."
 sudo yum update -y
 sudo yum install java-21-amazon-corretto -y
 sudo yum install screen unzip awscli -y
 
-# 3. Crear usuario y directorios para el servidor
+# 4. Crear usuario y directorios para el servidor
 if ! id "minecraft" &>/dev/null; then
   sudo useradd minecraft
 fi
 sudo mkdir -p /home/minecraft/server
 
-# 4. Descargar y extraer el Modpack de CurseForge desde S3
+# 5. Descargar y extraer el Modpack de CurseForge desde S3
 MODPACK_KEY="server-files/modpack.zip"
 echo "Descargando el modpack desde s3://$BUCKET_NAME/$MODPACK_KEY..."
 sudo aws s3 cp "s3://$BUCKET_NAME/$MODPACK_KEY" /tmp/modpack.zip
@@ -52,7 +64,7 @@ fi
 # Aceptar EULA
 echo "eula=true" | sudo tee /home/minecraft/server/eula.txt > /dev/null
 
-# 5. Copiar scripts del repositorio al servidor
+# 6. Copiar scripts del repositorio al servidor
 sudo cp start.sh /home/minecraft/server/start.sh
 sudo chmod +x /home/minecraft/server/start.sh
 
@@ -65,7 +77,7 @@ sudo chmod +x /home/minecraft/backup.sh
 # Configurar cronjob para respaldos diarios (04:00 AM)
 (sudo crontab -u minecraft -l 2>/dev/null; echo "0 4 /home/minecraft/backup.sh") | sudo crontab -u minecraft -
 
-# 6. Copiar y activar servicio Systemd
+# 7. Copiar y activar servicio Systemd
 sudo cp minecraft.service /etc/systemd/system/
 sudo chown -R minecraft:minecraft /home/minecraft
 
