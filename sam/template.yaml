@@ -177,6 +177,9 @@ Resources:
             echo "Extracting modpack..."
             unzip /tmp/modpack.zip -d /home/minecraft/server/
             rm /tmp/modpack.zip
+            if [ -f /home/minecraft/server/start.sh ]; then
+              mv /home/minecraft/server/start.sh /home/minecraft/server/start-modpack.sh
+            fi
           else
             echo "Warning: Modpack zip not found in S3. Creating an empty server directory."
           fi
@@ -184,15 +187,39 @@ Resources:
           # Accept EULA
           echo "eula=true" > /home/minecraft/server/eula.txt
           
-          # Setup start.sh script
+          # Setup start.sh script with dynamic memory calculation
           cat << 'EOF' > /home/minecraft/server/start.sh
           #!/bin/bash
           cd /home/minecraft/server
           
-          # Detect start methods for modpacks
-          if [ -f run.sh ]; then
+          # Calculate dynamic RAM + Swap allocated memory
+          TOTAL_RAM_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
+          TOTAL_SWAP_KB=$(grep SwapTotal /proc/meminfo | awk '{print $2}')
+          TOTAL_MEM_MB=$(( (TOTAL_RAM_KB + TOTAL_SWAP_KB) / 1024 ))
+          
+          # Set Java heap to 70% of total memory
+          MAX_RAM_MB=$(( TOTAL_MEM_MB * 70 / 100 ))
+          MIN_RAM_MB=$(( MAX_RAM_MB / 2 ))
+          if [ $MIN_RAM_MB -lt 1024 ]; then
+            MIN_RAM_MB=1024
+          fi
+          if [ $MAX_RAM_MB -lt $MIN_RAM_MB ]; then
+            MAX_RAM_MB=$MIN_RAM_MB
+          fi
+          
+          # 1. Detect if renamed start-modpack.sh exists (ServerPackCreator original script)
+          if [ -f start-modpack.sh ]; then
+            echo "Starting via original start-modpack.sh..."
+            sed -i 's/\r$//' start-modpack.sh
+            chmod +x start-modpack.sh
+            export JAVA_ARGS="-Xms${MIN_RAM_MB}M -Xmx${MAX_RAM_MB}M"
+            bash start-modpack.sh
+          # 2. Detect start methods for modpacks (Forge/Fabric run.sh)
+          elif [ -f run.sh ]; then
             echo "Starting via run.sh..."
+            chmod +x run.sh
             bash run.sh
+          # 3. Detect custom modpack start.sh (avoiding recursion)
           elif [ -f start.sh ] && [ "$(realpath start.sh)" != "$(realpath /home/minecraft/server/start.sh)" ]; then
             echo "Starting via modpack start.sh..."
             bash start.sh
@@ -200,8 +227,8 @@ Resources:
             # Search for typical launch jars (forge, fabric, server, paper)
             JAR_FILE=$(ls forge-*.jar fabric-server-launch.jar server.jar paper.jar 2>/dev/null | head -n 1)
             if [ -n "$JAR_FILE" ]; then
-              echo "Starting server jar $JAR_FILE..."
-              java -Xms4G -Xmx6G \
+              echo "Starting server jar $JAR_FILE with Min=${MIN_RAM_MB}M, Max=${MAX_RAM_MB}M..."
+              java -Xms${MIN_RAM_MB}M -Xmx${MAX_RAM_MB}M \
                 -XX:+UseG1GC \
                 -XX:+ParallelRefProcEnabled \
                 -XX:MaxGCPauseMillis=200 \

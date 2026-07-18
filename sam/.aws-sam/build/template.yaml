@@ -2,8 +2,8 @@ Transform: AWS::Serverless-2016-10-31
 Parameters:
   InstanceType:
     Type: String
-    Description: EC2 Instance Type for the Minecraft Server (modpacks require at least
-      8GB RAM).
+    Description: EC2 Instance Type for the Minecraft Server (modpacks require high
+      performance).
     Default: t3.xlarge
   JavaVersion:
     Type: String

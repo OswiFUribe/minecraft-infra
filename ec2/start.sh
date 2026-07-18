@@ -25,17 +25,27 @@ fi
 echo "Memoria física + swap detectada: ${TOTAL_MEM_MB}MB"
 echo "Asignando a Java: Min=${MIN_RAM_MB}MB, Max=${MAX_RAM_MB}MB"
 
-# 1. Detectar si el modpack tiene un script de inicio generado por el instalador (Forge/Fabric modernos)
-if [ -f run.sh ]; then
+# 1. Detectar si renombramos el start.sh original del modpack a start-modpack.sh
+if [ -f start-modpack.sh ]; then
+  echo "Encontrado start-modpack.sh. Limpiando saltos de línea Windows y ejecutando..."
+  sed -i 's/\r$//' start-modpack.sh
+  chmod +x start-modpack.sh
+  # Exportar los argumentos de memoria para que el script del modpack (variables.txt/serverstarter) los utilice
+  export JAVA_ARGS="-Xms${MIN_RAM_MB}M -Xmx${MAX_RAM_MB}M"
+  bash start-modpack.sh
+
+# 2. Detectar si el modpack tiene un run.sh generado por el instalador (Forge/Fabric modernos)
+elif [ -f run.sh ]; then
   echo "Encontrado run.sh. Iniciando usando la configuración del modpack..."
-  # Nota: Si el run.sh tiene flags fijos de memoria muy altos en user_jvm_args.txt,
-  # puedes modificar ese archivo para alinearlo con la RAM real de tu máquina.
+  chmod +x run.sh
   bash run.sh
-# 2. Detectar si hay un start.sh propio del modpack (evitando recursión de este script)
+
+# 3. Detectar si hay un start.sh propio del modpack (evitando recursión de este script)
 elif [ -f start.sh ] && [ "$(realpath start.sh)" != "$(realpath /home/minecraft/server/start.sh)" ]; then
   echo "Encontrado start.sh del modpack. Ejecutando..."
   bash start.sh
-# 3. Si no, buscar el primer JAR ejecutable compatible y correrlo con flags optimizados
+
+# 4. Si no, buscar el primer JAR ejecutable compatible y correrlo con flags optimizados
 else
   JAR_FILE=$(ls forge-*.jar fabric-server-launch.jar server.jar paper.jar 2>/dev/null | head -n 1)
 
@@ -55,7 +65,7 @@ else
       -XX:G1HeapWastePercent=5 \
       -jar "$JAR_FILE" nogui
   else
-    echo "Error: No se encontró ningún archivo de arranque run.sh ni un archivo JAR compatible."
+    echo "Error: No se encontró ningún archivo de arranque compatible."
     exit 1
   fi
 fi
