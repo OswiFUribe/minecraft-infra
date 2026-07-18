@@ -4,10 +4,11 @@ version = 0.1
 stack_name = "minecraft-control"
 resolve_s3 = true
 s3_prefix = "minecraft-control"
-region = "us-east-2"
 confirm_changeset = true
 capabilities = "CAPABILITY_IAM"
 image_repositories = []
+disable_rollback = true
+parameter_overrides = "InstanceType=\"t3.xlarge\" JavaVersion=\"java-21-amazon-corretto\" ModpackZipKey=\"server-files/modpack.zip\" LatestAmiId=\"/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64\""
 
 [default.global.parameters]
 region = "us-east-2"

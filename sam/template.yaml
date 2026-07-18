@@ -41,9 +41,11 @@ Resources:
 
   InternetGateway:
     Type: AWS::EC2::InternetGateway
-    Tags:
-      - Key: Name
-        Value: MinecraftIGW
+    Properties:
+      Tags:
+        - Key: Name
+          Value: MinecraftIGW
+
 
   VPCGatewayAttachment:
     Type: AWS::EC2::VPCGatewayAttachment
