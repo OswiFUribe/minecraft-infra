@@ -391,10 +391,24 @@ Resources:
           Properties:
             Schedule: cron(0 12 * * ? *)
 
+  MinecraftEIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: MinecraftEIP
+
+  MinecraftEIPAssociation:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      InstanceId: !Ref MinecraftEC2Instance
+      AllocationId: !GetAtt MinecraftEIP.AllocationId
+
 Outputs:
   ServerPublicIP:
-    Description: Public IP address of the Minecraft server
-    Value: !GetAtt MinecraftEC2Instance.PublicIp
+    Description: Public IP address of the Minecraft server (Elastic IP)
+    Value: !Ref MinecraftEIP
   BackupBucketName:
     Description: S3 Bucket Name for backups
     Value: !Ref MinecraftBackupBucket
