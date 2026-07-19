@@ -1,0 +1,9 @@
+# AWS SAM build directory
+sam/.aws-sam/
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# Log files
+*.log

@@ -2,10 +2,33 @@
 # Script de configuración del servidor de Minecraft para CurseForge en EC2
 # Este script se puede ejecutar de forma manual dentro de la instancia si es necesario.
 
-# 1. Obtener la región e información del stack de CloudFormation
+# 1. Instalar dependencias esenciales primero (antes de usar AWS CLI)
+echo "Actualizando sistema e instalando dependencias (Java, Screen, Unzip, AWS CLI)..."
+sudo yum update -y
+sudo yum install java-21-amazon-corretto -y
+sudo yum install screen unzip awscli -y
+
+# 2. Configurar memoria Swap de 4GB (Crucial de seguridad para prevenir caídas de memoria)
+if [ ! -f /swapfile ]; then
+  echo "Configurando 4GB de memoria Swap..."
+  sudo dd if=/dev/zero of=/swapfile bs=1M count=4096
+  sudo chmod 600 /swapfile
+  sudo mkswap /swapfile
+  sudo swapon /swapfile
+  echo "/swapfile swap swap defaults 0 0" | sudo tee -a /etc/fstab > /dev/null
+else
+  echo "Memoria Swap ya está configurada."
+fi
+
+# 3. Obtener la región e información del stack de CloudFormation
 REGION=$(curl -s http://169.254.169.254/latest/meta-data/placement/region)
 if [ -z "$REGION" ]; then
-  REGION="us-east-2" # Región por defecto
+  # Intentar obtener mediante token de IMDSv2
+  TOKEN=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
+  REGION=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/placement/region)
+fi
+if [ -z "$REGION" ]; then
+  REGION="us-east-2" # Región por defecto si falla lo anterior
 fi
 
 # Detectar el nombre del bucket de S3 desde CloudFormation
@@ -24,24 +47,6 @@ fi
 
 echo "Usando el bucket de S3: $BUCKET_NAME"
 
-# 2. Configurar memoria Swap de 4GB (Crucial para instancias del Free Tier como t2.micro/t3.micro)
-if [ ! -f /swapfile ]; then
-  echo "Configurando 4GB de memoria Swap..."
-  sudo dd if=/dev/zero of=/swapfile bs=1M count=4096
-  sudo chmod 600 /swapfile
-  sudo mkswap /swapfile
-  sudo swapon /swapfile
-  echo "/swapfile swap swap defaults 0 0" | sudo tee -a /etc/fstab > /dev/null
-else
-  echo "Memoria Swap ya está configurada."
-fi
-
-# 3. Actualizar sistema e instalar Java y utilidades
-echo "Instalando dependencias de sistema..."
-sudo yum update -y
-sudo yum install java-21-amazon-corretto -y
-sudo yum install screen unzip awscli -y
-
 # 4. Crear usuario y directorios para el servidor
 if ! id "minecraft" &>/dev/null; then
   sudo useradd minecraft
@@ -57,6 +62,11 @@ if [ -f /tmp/modpack.zip ]; then
   echo "Descomprimiendo el modpack..."
   sudo unzip -o /tmp/modpack.zip -d /home/minecraft/server/
   sudo rm /tmp/modpack.zip
+  
+  # Si el modpack viene con start.sh original, renombrarlo a start-modpack.sh
+  if [ -f /home/minecraft/server/start.sh ]; then
+    sudo mv /home/minecraft/server/start.sh /home/minecraft/server/start-modpack.sh
+  fi
 else
   echo "Advertencia: No se encontró el modpack en S3. Levantando servidor vacío..."
 fi
@@ -74,8 +84,9 @@ sudo cp ../backup/backup.sh /home/minecraft/backup.sh
 sudo sed -i "s|s3://minecraft-backups-tu-nombre/|s3://$BUCKET_NAME/backups/|g" /home/minecraft/backup.sh
 sudo chmod +x /home/minecraft/backup.sh
 
-# Configurar cronjob para respaldos diarios (04:00 AM)
-(sudo crontab -u minecraft -l 2>/dev/null; echo "0 4 /home/minecraft/backup.sh") | sudo crontab -u minecraft -
+# Registrar cronjob en el crontab del root (para permitir systemctl stop/start sin contraseña)
+# Expresión cron corregida a 5 campos para ejecución diaria a las 04:00 AM
+(sudo crontab -l 2>/dev/null; echo "0 4 * * * /home/minecraft/backup.sh") | sudo crontab -
 
 # 7. Copiar y activar servicio Systemd
 sudo cp minecraft.service /etc/systemd/system/
