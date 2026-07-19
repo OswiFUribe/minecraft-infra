@@ -2,8 +2,20 @@ import boto3
 import os
 
 INSTANCE_ID = os.environ["INSTANCE_ID"]
+API_KEY = os.environ.get("API_KEY", "")
 
 def lambda_handler(event, context):
+    # Optional API Key authentication check
+    if API_KEY:
+        params = event.get("queryStringParameters") or {}
+        headers = event.get("headers") or {}
+        provided_key = headers.get("x-api-key") or params.get("key")
+        if provided_key != API_KEY:
+            return {
+                "statusCode": 401,
+                "body": "Unauthorized: Invalid API Key"
+            }
+
     ec2 = boto3.client("ec2")
 
     ec2.stop_instances(
@@ -14,3 +26,4 @@ def lambda_handler(event, context):
         "statusCode": 200,
         "body": "Server stopping"
     }
+
