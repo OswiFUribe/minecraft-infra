@@ -27,7 +27,10 @@ sudo systemctl start minecraft
 
 # 5. Subir el respaldo al bucket de S3
 # El setup.sh reemplazará este bucket por el correspondiente de tu CloudFormation
-aws s3 cp /tmp/$BACKUP s3://minecraft-backups-tu-nombre/
-
-# 6. Limpiar archivo temporal
-rm /tmp/$BACKUP
+if aws s3 cp /tmp/$BACKUP s3://minecraft-backups-tu-nombre/; then
+  # 6. Limpiar archivo temporal solo si la subida fue exitosa
+  rm /tmp/$BACKUP
+else
+  echo "Error: Fallo al subir el respaldo a S3. Conservando el archivo local en /tmp/$BACKUP." >&2
+  exit 1
+fi

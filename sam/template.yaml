@@ -93,6 +93,8 @@ Resources:
   # S3 Bucket for backups and modpacks
   MinecraftBackupBucket:
     Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       BucketName: !Sub "minecraft-backups-${AWS::AccountId}-${AWS::Region}"
       PublicAccessBlockConfiguration:
@@ -277,14 +279,18 @@ Resources:
           sudo systemctl start minecraft
           
           # Copy to S3
-          aws s3 cp /tmp/$BACKUP s3://${MinecraftBackupBucket}/backups/
-          rm /tmp/$BACKUP
+          if aws s3 cp /tmp/$BACKUP s3://${MinecraftBackupBucket}/backups/; then
+            rm /tmp/$BACKUP
+          else
+            echo "Error: Failed to upload backup to S3. Retaining local backup file." >&2
+            exit 1
+          fi
           EOF
           
           chmod +x /home/minecraft/backup.sh
           
           # Setup cron job for backup at 04:00 AM daily
-          (crontab -l 2>/dev/null; echo "0 4 * * * /home/minecraft/backup.sh") | crontab -
+          (crontab -l 2>/dev/null | grep -v "/home/minecraft/backup.sh"; echo "0 4 * * * /home/minecraft/backup.sh") | crontab -
           
           # Setup systemd service (runs inside a screen session to allow interactive console if needed via SSM)
           cat << 'EOF' > /etc/systemd/system/minecraft.service
@@ -297,7 +303,7 @@ Resources:
           User=minecraft
           WorkingDirectory=/home/minecraft/server
           ExecStart=/usr/bin/screen -DmS minecraft /home/minecraft/server/start.sh
-          ExecStop=/usr/bin/screen -p 0 -S minecraft -X eval 'stuff "stop\r"'
+          ExecStop=-/usr/bin/screen -p 0 -S minecraft -X eval 'stuff "stop\r"'
           Restart=always
           RestartSec=10
           

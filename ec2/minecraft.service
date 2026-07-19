@@ -9,7 +9,7 @@ WorkingDirectory=/home/minecraft/server
 # Ejecuta start.sh dentro de una sesión de screen llamada 'minecraft'
 ExecStart=/usr/bin/screen -DmS minecraft /home/minecraft/server/start.sh
 # Ejecuta el comando 'stop' de forma segura en la consola de screen al detener el servicio
-ExecStop=/usr/bin/screen -p 0 -S minecraft -X eval 'stuff "stop\r"'
+ExecStop=-/usr/bin/screen -p 0 -S minecraft -X eval 'stuff "stop\r"'
 Restart=always
 RestartSec=10
 

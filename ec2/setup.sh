@@ -20,15 +20,15 @@ else
   echo "Memoria Swap ya está configurada."
 fi
 
-# 3. Obtener la región e información del stack de CloudFormation
-REGION=$(curl -s http://169.254.169.254/latest/meta-data/placement/region)
-if [ -z "$REGION" ]; then
-  # Intentar obtener mediante token de IMDSv2
-  TOKEN=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
-  REGION=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/placement/region)
+# 3. Obtener la región usando IMDSv2/IMDSv1 de forma segura
+TOKEN=$(curl -s -f -m 2 -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
+if [ -n "$TOKEN" ]; then
+  REGION=$(curl -s -f -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/placement/region)
+else
+  REGION=$(curl -s -f -m 2 http://169.254.169.254/latest/meta-data/placement/region)
 fi
 if [ -z "$REGION" ]; then
-  REGION="us-east-2" # Región por defecto si falla lo anterior
+  REGION="us-east-2" # Región por defecto si ambos fallan
 fi
 
 # Detectar el nombre del bucket de S3 desde CloudFormation (o usar el argumento $1)
@@ -89,8 +89,8 @@ sudo sed -i "s|s3://minecraft-backups-tu-nombre/|s3://$BUCKET_NAME/backups/|g" /
 sudo chmod +x /home/minecraft/backup.sh
 
 # Registrar cronjob en el crontab del root (para permitir systemctl stop/start sin contraseña)
-# Expresión cron corregida a 5 campos para ejecución diaria a las 04:00 AM
-(sudo crontab -l 2>/dev/null; echo "0 4 * * * /home/minecraft/backup.sh") | sudo crontab -
+# Expresión cron corregida a 5 campos para ejecución diaria a las 04:00 AM. Se eliminan duplicados previos.
+(sudo crontab -l 2>/dev/null | grep -v "/home/minecraft/backup.sh"; echo "0 4 * * * /home/minecraft/backup.sh") | sudo crontab -
 
 # 7. Copiar y activar servicio Systemd
 sudo cp minecraft.service /etc/systemd/system/
