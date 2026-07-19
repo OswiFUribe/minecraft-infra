@@ -16,6 +16,14 @@ Parameters:
   LatestAmiId:
     Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
     Default: '/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64'
+  AllowedIp:
+    Type: String
+    Description: CIDR block allowed to connect to the Minecraft server (use 0.0.0.0/0 to allow all).
+    Default: 0.0.0.0/0
+  ControlApiKey:
+    Type: String
+    Description: Simple API Key required to trigger control lambdas (/start, /stop, /latest-backup). Leave empty to disable auth.
+    Default: ""
 
 Resources:
   # Networking
@@ -85,7 +93,7 @@ Resources:
         - IpProtocol: tcp
           FromPort: 25565
           ToPort: 25565
-          CidrIp: 0.0.0.0/0
+          CidrIp: !Ref AllowedIp
       SecurityGroupEgress:
         - IpProtocol: -1
           CidrIp: 0.0.0.0/0
@@ -338,6 +346,7 @@ Resources:
       Environment:
         Variables:
           INSTANCE_ID: !Ref MinecraftEC2Instance
+          API_KEY: !Ref ControlApiKey
       Policies:
         - Statement:
             - Effect: Allow
@@ -349,7 +358,7 @@ Resources:
           Type: HttpApi
           Properties:
             Path: /start
-            Method: GET
+            Method: POST
 
   LatestBackupFunction:
     Type: AWS::Serverless::Function
@@ -362,6 +371,7 @@ Resources:
       Environment:
         Variables:
           BUCKET_NAME: !Ref MinecraftBackupBucket
+          API_KEY: !Ref ControlApiKey
       Policies:
         - Statement:
             - Effect: Allow
@@ -389,6 +399,7 @@ Resources:
       Environment:
         Variables:
           INSTANCE_ID: !Ref MinecraftEC2Instance
+          API_KEY: !Ref ControlApiKey
       Policies:
         - Statement:
             - Effect: Allow
@@ -400,7 +411,7 @@ Resources:
           Type: HttpApi
           Properties:
             Path: /stop
-            Method: GET
+            Method: POST
         DailyShutdown:
           Type: Schedule
           Properties:

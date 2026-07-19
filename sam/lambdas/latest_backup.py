@@ -4,6 +4,7 @@ from botocore.config import Config
 
 BUCKET = os.environ["BUCKET_NAME"]
 REGION = os.environ["AWS_REGION"]
+API_KEY = os.environ.get("API_KEY", "")
 
 config = Config(
     signature_version="s3v4",
@@ -11,6 +12,17 @@ config = Config(
 )
 
 def lambda_handler(event, context):
+    # Optional API Key authentication check
+    if API_KEY:
+        params = event.get("queryStringParameters") or {}
+        headers = event.get("headers") or {}
+        provided_key = headers.get("x-api-key") or params.get("key")
+        if provided_key != API_KEY:
+            return {
+                "statusCode": 401,
+                "body": "Unauthorized: Invalid API Key"
+            }
+
     s3 = boto3.client("s3", region_name=REGION, config=config)
 
     response = s3.list_objects_v2(Bucket=BUCKET)
