@@ -3,6 +3,7 @@ Description=Minecraft Server
 After=network.target
 
 [Service]
+Type=simple
 User=minecraft
 WorkingDirectory=/home/minecraft/server
 # Ejecuta start.sh dentro de una sesión de screen llamada 'minecraft'

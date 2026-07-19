@@ -7,7 +7,7 @@ s3_prefix = "minecraft-control"
 confirm_changeset = true
 capabilities = "CAPABILITY_IAM"
 image_repositories = []
-disable_rollback = true
+disable_rollback = false
 parameter_overrides = "InstanceType=\"t3.xlarge\" JavaVersion=\"java-21-amazon-corretto\" ModpackZipKey=\"server-files/modpack.zip\" LatestAmiId=\"/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64\""
 
 [default.global.parameters]

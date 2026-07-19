@@ -88,8 +88,6 @@ Resources:
           CidrIp: 0.0.0.0/0
       SecurityGroupEgress:
         - IpProtocol: -1
-          FromPort: -1
-          ToPort: -1
           CidrIp: 0.0.0.0/0
 
   # S3 Bucket for backups and modpacks
@@ -256,14 +254,24 @@ Resources:
           DATE=$(date +"%Y-%m-%d_%H-%M")
           BACKUP="mc_backup_$DATE.tar.gz"
           
+          # Find existing paths to prevent tar from throwing glob errors
+          PATHS_TO_BACKUP=""
+          for path in /home/minecraft/server/world* /home/minecraft/server/mods /home/minecraft/server/config; do
+            if [ -e "$path" ]; then
+              PATHS_TO_BACKUP="$PATHS_TO_BACKUP $path"
+            fi
+          done
+          
+          if [ -z "$PATHS_TO_BACKUP" ]; then
+            echo "Error: No valid folders found to backup."
+            exit 1
+          fi
+          
           # Stop service to prevent world corruption
           sudo systemctl stop minecraft
           
           # Create backup tarball
-          tar -czvf /tmp/$BACKUP \
-            /home/minecraft/server/world* \
-            /home/minecraft/server/mods \
-            /home/minecraft/server/config
+          tar -czvf /tmp/$BACKUP $PATHS_TO_BACKUP
           
           # Restart service
           sudo systemctl start minecraft
@@ -285,6 +293,7 @@ Resources:
           After=network.target
           
           [Service]
+          Type=simple
           User=minecraft
           WorkingDirectory=/home/minecraft/server
           ExecStart=/usr/bin/screen -DmS minecraft /home/minecraft/server/start.sh
@@ -408,7 +417,7 @@ Resources:
 Outputs:
   ServerPublicIP:
     Description: Public IP address of the Minecraft server (Elastic IP)
-    Value: !Ref MinecraftEIP
+    Value: !GetAtt MinecraftEIP.PublicIp
   BackupBucketName:
     Description: S3 Bucket Name for backups
     Value: !Ref MinecraftBackupBucket

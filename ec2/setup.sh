@@ -31,17 +31,21 @@ if [ -z "$REGION" ]; then
   REGION="us-east-2" # Región por defecto si falla lo anterior
 fi
 
-# Detectar el nombre del bucket de S3 desde CloudFormation
-STACK_NAME="minecraft-control"
-BUCKET_NAME=$(aws cloudformation describe-stacks \
-  --stack-name "$STACK_NAME" \
-  --region "$REGION" \
-  --query "Stacks[0].Outputs[?OutputKey=='BackupBucketName'].OutputValue" \
-  --output text 2>/dev/null)
+# Detectar el nombre del bucket de S3 desde CloudFormation (o usar el argumento $1)
+if [ -n "$1" ]; then
+  BUCKET_NAME="$1"
+else
+  STACK_NAME="minecraft-control"
+  BUCKET_NAME=$(aws cloudformation describe-stacks \
+    --stack-name "$STACK_NAME" \
+    --region "$REGION" \
+    --query "Stacks[0].Outputs[?OutputKey=='BackupBucketName'].OutputValue" \
+    --output text 2>/dev/null)
+fi
 
 if [ -z "$BUCKET_NAME" ] || [ "$BUCKET_NAME" == "None" ]; then
-  echo "Error: No se pudo obtener el nombre del bucket de S3 desde el stack '$STACK_NAME'."
-  echo "Por favor asegúrate de haber desplegado la infraestructura usando SAM primero."
+  echo "Error: No se pudo obtener el nombre del bucket de S3."
+  echo "Uso: bash setup.sh <nombre-del-bucket-s3>"
   exit 1
 fi
 
